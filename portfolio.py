@@ -65,7 +65,7 @@ def scrape_dividend(ticker):
     url = "https://www.quotemedia.com/portal/dividends?qm_symbol="
     full_url = url + ticker
 
-    driver = webdriver.Chrome("/Users/mzheng/Downloads/chromedriver")
+    driver = webdriver.Chrome()
     driver.get(full_url)
 
     wait = WebDriverWait(driver, 10, poll_frequency=5)
@@ -81,9 +81,38 @@ def scrape_dividend(ticker):
 
 #    time.sleep(10)
     elem = driver.find_element_by_xpath("//*[@id='DataTables_Table_0']")
-    print(elem)
+    print(elem.text)
+
+    NEXT_BUTTON_ID = "//*[@id='DataTables_Table_0_next']"
+    # read more lines from the table
+    while True:
+        try:
+            button = driver.find_element_by_xpath(NEXT_BUTTON_ID)
+        except:
+            break
+
+        # press the button
+        if button.is_displayed():
+            button.click()
+        else:
+            break
+
+        # now wait for the data to be reloaded
+        wait = WebDriverWait(driver, 10, poll_frequency=5)
+        try:
+            page_loaded = wait.until(
+                lambda driver: driver.find_element_by_xpath("//*[@id='DataTables_Table_0']")
+            )
+        #    element = WebDriverWait(driver, 10, poll_frequency=5).until(
+        #        EC.presence_of_element_located((By.ID, "DataTables_Table_0"))
+        #    )
+            elem = driver.find_element_by_xpath("//*[@id='DataTables_Table_0']")
+            print(elem.text)
+        except:
+            break
+        
     driver.close()
 
 if __name__ == '__main__':
-    main()
-    #scrape_dividend("VTI")
+    #main()
+    scrape_dividend("VTI")
