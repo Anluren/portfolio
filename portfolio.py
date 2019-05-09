@@ -21,6 +21,12 @@ from datetime import date
 import re
 
 import json
+from forex_python.converter import CurrencyRates
+
+def get_exchange_rate(date_obj):
+    c = CurrencyRates()
+    return c.get_rate("USD", "CAD", \
+        datetime.datetime(date_obj.year, date_obj.month, date_obj.day, 0,0, 0,0))
 
 # If modifying these scopes, delete the file token.pickle.
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets.readonly']
@@ -81,7 +87,8 @@ class Dividend_dist_record:
         # 2013-09-18        Announced
         self.announced_date = datetime.datetime.strptime(lines[index+5], "%Y-%m-%d").date()
         # return number of line processed
-        return 7
+        return
+
     def __str__(self):
         return f"{self.ex_div_date}\t{self.amount}\t{self.payment_date}"
 
@@ -90,8 +97,10 @@ class Dividend_dist_record:
 
 
 class Dividend_history:
-    def __init__(self):
+    def __init__(self, fund_ticker):
         self.history = []
+        self.ticker = fund_ticker
+
     def record_from_web_element(self, elem_str):
         # add all record from a web element with dividend records
         elem_str_array = elem_str.splitlines()
@@ -100,18 +109,23 @@ class Dividend_history:
         index = 1
         while index < len(elem_str_array):
             record = Dividend_dist_record()
-            index += record.record_web_data(elem_str_array, index)
+            try:
+                record.record_web_data(elem_str_array, index)
+                # add a new record to the history
+                self.history.append(record)
+            except:
+                del record
+            finally:
+                index += 7
 
-            # add a new record to the history
-            self.history.append(record)
     def __str__(self):
-        output = ""
+        output = f"Fund Ticker: {self.ticker}\n"
         for record in self.history:
             output += str(record) + "\n"
         return output
 
     def __repr__(self):
-        output = ""
+        output = f"Fund Ticker: {self.ticker}\n"
         for record in self.history:
             output += str(record) + "\n"
         return output
@@ -160,10 +174,10 @@ class Fundinfo:
         self.shares = shares
 
     def __repr__(self):
-        print(self.ticker, self.shares)
+        return self.ticker + ", " + str(self.shares)
 
     def __str__(self):
-        print(self.ticker, self.shares)
+        return self.ticker + ", " + str(self.shares)
 
     def get_ticker(self):
         return self.ticker
@@ -186,7 +200,7 @@ class Portfolio:
         # open the data base
         try:
             self.db_conn = sqlite3.connect(PORTFOLIO_DB_NAME)
-            self.db_c = conn.cursor()
+            self.db_c = self.db_conn.cursor()
             self.db_opened = 1
         except:
             self.db_opened = 0
@@ -255,7 +269,7 @@ class Portfolio:
         # read fund facts from database
         self.db_c.execute('SELECT * FROM Product_info')
 
-        data = self.db_c.fetchall()
+        db_data = self.db_c.fetchall()
 
         for data in db_data:
             fund = self.find_fund(data[0])
@@ -269,7 +283,7 @@ def main():
     portfolio.get_fundinfo_from_sheet()
 
 def scrape_dividend(ticker):
-    dividend_history = Dividend_history()
+    dividend_history = Dividend_history(ticker)
 
     full_url = DIVIDEND_DATA_URL + ticker
     driver = webdriver.Chrome()
@@ -339,8 +353,10 @@ def read_history_prices_from_csv(tiker):
             print(row)
 
 if __name__ == '__main__':
-    data_base_read_fund_info()
-#    main()
+#    data_base_read_fund_info()
+    main()
 #    scrape_dividend("ZCN:CA")
 
 #    IEX_TOKEN = read_iex_token('iex.json')
+    #main()
+#    scrape_dividend("ZCN:CA")
