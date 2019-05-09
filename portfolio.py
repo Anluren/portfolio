@@ -1,3 +1,7 @@
+# pip install selenium
+# pip install --upgrade google-api-python-client google-auth-httplib2 google-auth-oauthlib
+# pip install pandas-datareader
+# pip install pyEX 
 from __future__ import print_function
 import time
 import pickle
@@ -9,16 +13,21 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+import csv
+import sqlite3
 
 import datetime
 from datetime import date
 import re
+
+import json
 
 # If modifying these scopes, delete the file token.pickle.
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets.readonly']
 
 NEXT_BUTTON_ID = "//*[@id='DataTables_Table_0_next']"
 DIVIDEND_DATA_XPATH = "//*[@id='DataTables_Table_0']"
+DIVIDEND_DATA_ID = "DataTables_Table_0"
 DIVIDEND_DATA_URL = "https://www.quotemedia.com/portal/dividends?qm_symbol="
 
 # class to handle dividend data scraped from webpage, the raw is like this:
@@ -35,6 +44,9 @@ CAD_DOLLAR = 0
 USD_DOLLAR = 1
 
 is_debug = 1
+
+# IEX Cloud token
+IEX_TOKEN = {}
 
 def debug_print(string):
     if is_debug:
@@ -103,52 +115,158 @@ class Dividend_history:
         for record in self.history:
             output += str(record) + "\n"
         return output
+
+PORTFOLIO_DB_NAME = "portfolio.db"
+
+#testing code for accessing database
+def access_portfolio_database(sql_cmd):
+    conn = sqlite3.connect(PORTFOLIO_DB_NAME)
+    c = conn.cursor()
+    c.execute(sql_cmd)
+
+    data = c.fetchall()
+
+    conn.commit()
+    conn.close()
+
+    return data
+
+
+def data_base_read_fund_info():
+    data = access_portfolio_database('SELECT * FROM Product_info')
+    print(data)
+
+ticker_names = [
+    "VSB",
+    "VAB",
+    "BND",
+    "XIC",
+    "TDB900",
+    "VCN",
+    "ZCN",
+    "TDB902",
+    "VTI",
+    "TDB911",
+    "XEF",
+    "VEA",
+    "VXUS",
+    "VWO",
+]
+qm_ticker_name = {
+}
+class Fundinfo:
+    def __init__(self, ticker, shares):
+        self.ticker = ticker
+        self.shares = shares
+
+    def __repr__(self):
+        print(self.ticker, self.shares)
+
+    def __str__(self):
+        print(self.ticker, self.shares)
+
+    def get_ticker(self):
+        return self.ticker
     
-def main():
-    """Shows basic usage of the Sheets API.
-    Prints values from a sample spreadsheet.
-    """
-    # The ID and range of a sample spreadsheet.
-    with open("spreadsheet_id.txt", 'r') as f:
-        SAMPLE_SPREADSHEET_ID = f.readline().strip()
+    def is_fund(self, ticker):
+        return self.ticker == ticker
 
-    SAMPLE_RANGE_NAME = 'ALLOCATIONS!A4:E'
+    def set_info_from_db(self, da_entry):
+        # data base row is like this:
+        # (ticker, is_usd, fund_company, full_name)
+        self.is_usd = da_entry[1]
+        self.fund_company = da_entry[2]
+        self.asset_type = da_entry[3]
+        self.full_name = da_entry[4]
 
-    creds = None
-    # The file token.pickle stores the user's access and refresh tokens, and is
-    # created automatically when the authorization flow completes for the first
-    # time.
-    if os.path.exists('token.pickle'):
-        with open('token.pickle', 'rb') as token:
-            creds = pickle.load(token)
-    # If there are no (valid) credentials available, let the user log in.
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
+class Portfolio:
+    def __init__(self):
+        self.funds = []
+
+        # open the data base
+        try:
+            self.db_conn = sqlite3.connect(PORTFOLIO_DB_NAME)
+            self.db_c = conn.cursor()
+            self.db_opened = 1
+        except:
+            self.db_opened = 0
+
+    def find_fund(self, ticker):
+        for fund in self.funds:
+            if fund.is_fund(ticker):
+                return fund
+        return False
+
+    def __del__(self):
+        if self.db_opened:
+            self.db_conn.commit()
+            self.db_conn.close()
+
+    def __str__(self):
+        for fund in self.funds:
+            print(fund)
+
+    def get_fundinfo_from_sheet(self):
+        """Shows basic usage of the Sheets API.
+        Prints values from a sample spreadsheet.
+        """
+        # The ID and range of a sample spreadsheet.
+        with open("spreadsheet_id.txt", 'r') as f:
+            SAMPLE_SPREADSHEET_ID = f.readline().strip()
+
+        SAMPLE_RANGE_NAME = 'INPUT!A4:V'
+
+        creds = None
+        # The file token.pickle stores the user's access and refresh tokens, and is
+        # created automatically when the authorization flow completes for the first
+        # time.
+        if os.path.exists('token.pickle'):
+            with open('token.pickle', 'rb') as token:
+                creds = pickle.load(token)
+        # If there are no (valid) credentials available, let the user log in.
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            else:
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    'credentials.json', SCOPES)
+                creds = flow.run_local_server()
+            # Save the credentials for the next run
+            with open('token.pickle', 'wb') as token:
+                pickle.dump(creds, token)
+
+        service = build('sheets', 'v4', credentials=creds)
+
+        # Call the Sheets API
+        sheet = service.spreadsheets()
+        result = sheet.values().get(spreadsheetId=SAMPLE_SPREADSHEET_ID,
+                                    range=SAMPLE_RANGE_NAME).execute()
+        values = result.get('values', [])
+
+        if not values:
+            print('No data found.')
         else:
-            flow = InstalledAppFlow.from_client_secrets_file(
-                'credentials.json', SCOPES)
-            creds = flow.run_local_server()
-        # Save the credentials for the next run
-        with open('token.pickle', 'wb') as token:
-            pickle.dump(creds, token)
+            for row in values:
+                # Print columns A and E, which correspond to indices 0 and 4.
+                if len(row) >= 22:
+                    if (row[1] in ticker_names):
+                        self.funds.append(Fundinfo(row[1],row[21]))
 
-    service = build('sheets', 'v4', credentials=creds)
+        # read fund facts from database
+        self.db_c.execute('SELECT * FROM Product_info')
 
-    # Call the Sheets API
-    sheet = service.spreadsheets()
-    result = sheet.values().get(spreadsheetId=SAMPLE_SPREADSHEET_ID,
-                                range=SAMPLE_RANGE_NAME).execute()
-    values = result.get('values', [])
+        data = self.db_c.fetchall()
 
-    if not values:
-        print('No data found.')
-    else:
-        print('Name, Major:')
-        for row in values:
-            # Print columns A and E, which correspond to indices 0 and 4.
-            if len(row) >= 5:
-                print('%s, %s' % (row[0], row[4]))
+        for data in db_data:
+            fund = self.find_fund(data[0])
+            if fund:
+                fund.set_info_from_db(data)
+
+        return True
+
+def main():
+    portfolio = Portfolio()
+    portfolio.get_fundinfo_from_sheet()
 
 def scrape_dividend(ticker):
     dividend_history = Dividend_history()
@@ -160,7 +278,7 @@ def scrape_dividend(ticker):
     wait = WebDriverWait(driver, 10, poll_frequency=1)
     try:
         page_loaded = wait.until(
-            lambda driver: driver.find_element_by_xpath(DIVIDEND_DATA_XPATH)
+            lambda driver: driver.find_element_by_id(DIVIDEND_DATA_ID)
         )
     #    element = WebDriverWait(driver, 10, poll_frequency=5).until(
     #        EC.presence_of_element_located((By.ID, "DataTables_Table_0"))
@@ -169,7 +287,7 @@ def scrape_dividend(ticker):
         driver.close()
 
 #    time.sleep(10)
-    elem = driver.find_element_by_xpath(DIVIDEND_DATA_XPATH)
+    elem = driver.find_element_by_id(DIVIDEND_DATA_ID)
     debug_print(elem.text)
     dividend_history.record_from_web_element(elem.text)
 
@@ -190,7 +308,7 @@ def scrape_dividend(ticker):
         wait = WebDriverWait(driver, 10, poll_frequency=1)
         try:
             page_loaded = wait.until(
-                lambda driver: driver.find_element_by_xpath(DIVIDEND_DATA_XPATH)
+                lambda driver: driver.find_element_by_id(DIVIDEND_DATA_ID)
             )
         #    element = WebDriverWait(driver, 10, poll_frequency=5).until(
         #        EC.presence_of_element_located((By.ID, "DataTables_Table_0"))
@@ -206,6 +324,23 @@ def scrape_dividend(ticker):
 
     driver.close()
 
+def get_stock_history_price(ticker):
+    c = pyEX.Client(IEX_TOKEN["SecretToken"])
+
+def read_iex_token(file):
+    with open(file) as f:
+        return f.load(f)
+
+def read_history_prices_from_csv(tiker):
+    file_name = 'csv/' + tiker + 'csv'
+    with open(file_name, newline='') as csvfile:
+        reader = csv.DictReader(csvfile)
+        for row in reader:
+            print(row)
+
 if __name__ == '__main__':
-    #main()
-    scrape_dividend("ZCN:CA")
+    data_base_read_fund_info()
+#    main()
+#    scrape_dividend("ZCN:CA")
+
+#    IEX_TOKEN = read_iex_token('iex.json')
