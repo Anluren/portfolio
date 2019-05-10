@@ -32,9 +32,10 @@ def get_exchange_rate(date_obj):
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets.readonly']
 
 NEXT_BUTTON_ID = "//*[@id='DataTables_Table_0_next']"
-DIVIDEND_DATA_XPATH = "//*[@id='DataTables_Table_0']"
+#DIVIDEND_DATA_XPATH = "//*[@id='DataTables_Table_0']"
 DIVIDEND_DATA_ID = "DataTables_Table_0"
 DIVIDEND_DATA_URL = "https://www.quotemedia.com/portal/dividends?qm_symbol="
+HISTORY_DATA_URL = "https://www.quotemedia.com/portal/history?qm_symbol="
 
 # class to handle dividend data scraped from webpage, the raw is like this:
 #
@@ -95,18 +96,16 @@ class Dividend_dist_record:
     def __repr__(self):
         return f"{self.ex_div_date}\t{self.amount}\t{self.payment_date}"
 
-
 class Dividend_history:
     def __init__(self, fund_ticker):
         self.history = []
         self.ticker = fund_ticker
 
-    def record_from_web_element(self, elem_str):
+    def record_from_web_element(self, elem_str_array):
         # add all record from a web element with dividend records
-        elem_str_array = elem_str.splitlines()
+#        elem_str_array = elem_str.splitlines()
 
-        # skip first line which is title of the table
-        index = 1
+        index = 0
         while index < len(elem_str_array):
             record = Dividend_dist_record()
             try:
@@ -129,6 +128,58 @@ class Dividend_history:
         for record in self.history:
             output += str(record) + "\n"
         return output
+
+
+class Fund_price_entry:
+    def __init__(self):
+        pass
+
+    def __str__(self):
+        try:
+            return f"{self.date} open:{self.open} high:{self.high} low:{self.low} close:{self.close}"
+        except:
+            return ""
+
+    def __repr__(self):
+        try:
+            return f"{self.date} open:{self.open} high:{self.high} low:{self.low} close:{self.close}"
+        except:
+            return ""
+            
+    # parse history price scraped from https://www.quotemedia.com/
+    #2019-05-09 22.11 22.15 22.00 22.10 22.081 37.29k -0.45% -0.10 823,445.00 163
+    def record_web_data(self, line):
+        line_fields = line.replace("--", "00").split()
+        self.date = datetime.datetime.strptime(line_fields[0], "%Y-%m-%d").date()
+        self.open = float(line_fields[1])
+        self.high = float(line_fields[2])
+        self.low = float(line_fields[3])
+        self.close = float(line_fields[4])
+
+class Fund_price_history:
+    def __init__(self, fund_ticker):
+        self.history = []
+        self.ticker = fund_ticker
+
+    def __repr__(self):
+        text = ""
+        for record in self.history:
+            text += str(record) + "\n"
+        return text
+
+    def __str__(self):
+        return self.__repr__()
+
+    # parse price data with following layout
+    #Date Open High Low Close VWAP Volume % Chg Change Trade Val Total Trades
+    #2019-05-10 -- -- -- 22.10 -- -- 0.00% -- -- --
+    #2019-05-09 22.11 22.15 22.00 22.10 22.081 37.29k -0.45% -0.10 823,445.00 163
+    def record_from_web_element(self, elem_str_array):
+        for line in elem_str_array:
+            fund_price_entry = Fund_price_entry()
+            fund_price_entry.record_web_data(line)
+            self.history.append(fund_price_entry)
+
 
 PORTFOLIO_DB_NAME = "portfolio.db"
 
@@ -288,12 +339,13 @@ def main():
     portfolio = Portfolio()
     portfolio.get_fundinfo_from_sheet()
 
-def scrape_dividend(ticker):
-    dividend_history = Dividend_history(ticker)
 
-    full_url = DIVIDEND_DATA_URL + ticker
+# function to scrape fund data from https://www.quotemedia.com
+def scrape_quotemedia_data(ticker, url, table_id):
+    full_url = url + ticker
     driver = webdriver.Chrome()
     driver.get(full_url)
+    web_data = []
 
     wait = WebDriverWait(driver, 10, poll_frequency=1)
     try:
@@ -309,7 +361,8 @@ def scrape_dividend(ticker):
 #    time.sleep(10)
     elem = driver.find_element_by_id(DIVIDEND_DATA_ID)
     debug_print(elem.text)
-    dividend_history.record_from_web_element(elem.text)
+    # skip the title line for the data table
+    web_data += (elem.text.splitlines())[1:]
 
     # read more lines from the table
     while True:
@@ -333,16 +386,27 @@ def scrape_dividend(ticker):
         #    element = WebDriverWait(driver, 10, poll_frequency=5).until(
         #        EC.presence_of_element_located((By.ID, "DataTables_Table_0"))
         #    )
-            elem = driver.find_element_by_xpath(DIVIDEND_DATA_XPATH)
+            elem = driver.find_element_by_id(DIVIDEND_DATA_ID)
+            # skip the title line for the data table
+            web_data += (elem.text.splitlines())[1:]
             debug_print(elem.text)
-            dividend_history.record_from_web_element(elem.text)
         except:
             break
-        
-    # print all history
-    print(dividend_history)
-
     driver.close()
+    return web_data
+
+
+# scrape dividend history of fund
+def scrape_dividend(ticker):
+    dividend_history = Dividend_history(ticker)
+    web_data = scrape_quotemedia_data(ticker, DIVIDEND_DATA_URL, DIVIDEND_DATA_ID)
+    dividend_history.record_from_web_element(web_data)
+
+def scrape_history(ticker):
+    price_history = Fund_price_history(ticker)
+    web_data = scrape_quotemedia_data(ticker, HISTORY_DATA_URL, DIVIDEND_DATA_ID)
+    price_history.record_from_web_element(web_data)
+    print(price_history)
 
 def get_stock_history_price(ticker):
     c = pyEX.Client(IEX_TOKEN["SecretToken"])
@@ -362,6 +426,7 @@ if __name__ == '__main__':
 #    data_base_read_fund_info()
     main()
 #    scrape_dividend("ZCN:CA")
+    scrape_history("ZCN:CA")
 
 #    IEX_TOKEN = read_iex_token('iex.json')
     #main()
