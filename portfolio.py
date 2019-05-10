@@ -192,6 +192,12 @@ class Fundinfo:
         self.fund_company = da_entry[2]
         self.asset_type = da_entry[3]
         self.full_name = da_entry[4]
+    
+    def get_quotemedia_symbol(self):
+        if not self.is_usd:
+            return self.ticker + ":CA"
+        else:
+            return self.ticker
 
 class Portfolio:
     def __init__(self):
