@@ -36,6 +36,7 @@ NEXT_BUTTON_ID = "//*[@id='DataTables_Table_0_next']"
 DIVIDEND_DATA_ID = "DataTables_Table_0"
 DIVIDEND_DATA_URL = "https://www.quotemedia.com/portal/dividends?qm_symbol="
 HISTORY_DATA_URL = "https://www.quotemedia.com/portal/history?qm_symbol="
+PORTFOLIO_DB_NAME = "portfolio.db"
 
 # class to handle dividend data scraped from webpage, the raw is like this:
 #
@@ -58,6 +59,11 @@ IEX_TOKEN = {}
 def debug_print(string):
     if is_debug:
         print(string)
+
+# convert date in following format to timedate.date:
+# yyyy-mm-dd
+def str_to_date(date_str):
+    return datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
 
 class Dividend_dist_record:
     def __init__(self):
@@ -145,20 +151,37 @@ class Fund_price_entry:
             return f"{self.date} open:{self.open} high:{self.high} low:{self.low} close:{self.close}"
         except:
             return ""
-            
+
+    def get_date(self):
+        return self.date
+
     # parse history price scraped from https://www.quotemedia.com/
     #2019-05-09 22.11 22.15 22.00 22.10 22.081 37.29k -0.45% -0.10 823,445.00 163
     def record_web_data(self, line):
         line_fields = line.replace("--", "00").split()
-        self.date = datetime.datetime.strptime(line_fields[0], "%Y-%m-%d").date()
+        self.date = str_to_date(line_fields[0])
         self.open = float(line_fields[1])
         self.high = float(line_fields[2])
         self.low = float(line_fields[3])
         self.close = float(line_fields[4])
 
+    def record_data_base_data(self, price_record):
+        self.date = str_to_date(price_record[0])
+        self.open = float(price_record[1])
+        self.high = float(price_record[2])
+        self.low = float(price_record[3])
+        self.close = float(price_record[4])
+
+
+    def get_date_entry_update_sql_cmd(self, ticker):
+        cmd = f'INSERT INTO "{ticker}.HistoricalPrice" (Date,' \
+               f'Open,High,Low,Close) VALUES ' \
+                f'("{self.date!s}", {self.open!s}, {self.high}, {self.low}, {self.close});'
+        return cmd
+
 class Fund_price_history:
     def __init__(self, fund_ticker):
-        self.history = []
+        self.history = {}
         self.ticker = fund_ticker
 
     def __repr__(self):
@@ -175,13 +198,39 @@ class Fund_price_history:
     #2019-05-10 -- -- -- 22.10 -- -- 0.00% -- -- --
     #2019-05-09 22.11 22.15 22.00 22.10 22.081 37.29k -0.45% -0.10 823,445.00 163
     def record_from_web_element(self, elem_str_array):
+        price_entries = []
         for line in elem_str_array:
             fund_price_entry = Fund_price_entry()
             fund_price_entry.record_web_data(line)
-            self.history.append(fund_price_entry)
+            # can not trust the date for today, so ignore it
+            if (fund_price_entry.get_date() not in self.history) \
+                and (date.today() != fund_price_entry.date):
+                price_entries.insert(0, fund_price_entry)
+                self.history[fund_price_entry.get_date()] = fund_price_entry
+            else:
+                del fund_price_entry
+        return price_entries
 
+    # retrieve history price from data price
+    def data_base_read_price_history(self, data_base_cursor):
+        count = 0
+        sql_cmd = "SELECT * FROM \"" + self.ticker + ".HistoricalPrice\""
+        data = data_base_cursor.execute(sql_cmd)
+        for line in data:
+            fund_price_entry = Fund_price_entry()
+            try:
+                fund_price_entry.record_data_base_data(line)
+            except:
+                # ignore if the data in the database is null, like this:
+                # 2001-05-21	null	null	null	null	null	null
+                next
 
-PORTFOLIO_DB_NAME = "portfolio.db"
+            if fund_price_entry.get_date() not in self.history:
+                self.history[fund_price_entry.get_date()] = fund_price_entry
+            else:
+                del fund_price_entry
+        return count
+
 
 #testing code for accessing database
 def access_portfolio_database(sql_cmd):
@@ -198,8 +247,8 @@ def access_portfolio_database(sql_cmd):
 
 
 def data_base_read_fund_info():
-    data = access_portfolio_database('SELECT * FROM Product_info')
-    print(data)
+    return access_portfolio_database('SELECT * FROM Product_info')
+    
 
 ticker_names = [
     "VSB",
@@ -217,12 +266,13 @@ ticker_names = [
     "VXUS",
     "VWO",
 ]
-qm_ticker_name = {
-}
+
 class Fundinfo:
     def __init__(self, ticker, shares):
         self.ticker = ticker
         self.shares = shares
+        self.historical_price = Fund_price_history(ticker)
+        self.history_dividend = Dividend_history(ticker)
 
     def __repr__(self):
         return self.ticker + ", " + str(self.shares)
@@ -249,6 +299,27 @@ class Fundinfo:
             return self.ticker + ":CA"
         else:
             return self.ticker
+    
+    def update_dividend_data(self):
+        web_data = scrape_quotemedia_data(self.get_quotemedia_symbol(), 
+                                          DIVIDEND_DATA_URL,
+                                          DIVIDEND_DATA_ID)
+        self.history_dividend.record_from_web_element(web_data)
+
+    def load_history_price_data(self, data_base_cursor):
+        # load price history from history
+        self.historical_price.data_base_read_price_history(data_base_cursor)
+        
+        web_data = scrape_quotemedia_data(self.get_quotemedia_symbol(), 
+                                          HISTORY_DATA_URL,
+                                          DIVIDEND_DATA_ID)
+        new_entries = self.historical_price.record_from_web_element(web_data)
+
+        # insert the new entries into the database
+        for fund_price_entry in new_entries:
+            data_base_cursor.execute(
+                fund_price_entry.get_date_entry_update_sql_cmd(self.ticker))
+
 
 class Portfolio:
     def __init__(self):
@@ -334,11 +405,20 @@ class Portfolio:
                 fund.set_info_from_db(data)
 
         return True
+    def load_fund_price_history(self, ticker):
+        fund = self.find_fund(ticker)
+        fund.load_history_price_data(self.db_c)
+
+    def update_all_funds_price_history(self):
+        for fund in self.funds:
+            debug_print(str(fund))
+            self.load_fund_price_history(fund.get_ticker())
 
 def main():
     portfolio = Portfolio()
     portfolio.get_fundinfo_from_sheet()
-
+    portfolio.update_all_funds_price_history()
+   
 
 # function to scrape fund data from https://www.quotemedia.com
 def scrape_quotemedia_data(ticker, url, table_id):
@@ -426,7 +506,7 @@ if __name__ == '__main__':
 #    data_base_read_fund_info()
     main()
 #    scrape_dividend("ZCN:CA")
-    scrape_history("ZCN:CA")
+#    scrape_history("ZCN:CA")
 
 #    IEX_TOKEN = read_iex_token('iex.json')
     #main()
