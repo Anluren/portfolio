@@ -108,9 +108,6 @@ class Dividend_history:
         self.ticker = fund_ticker
 
     def record_from_web_element(self, elem_str_array):
-        # add all record from a web element with dividend records
-#        elem_str_array = elem_str.splitlines()
-
         index = 0
         while index < len(elem_str_array):
             record = Dividend_dist_record()
@@ -432,13 +429,9 @@ def scrape_quotemedia_data(ticker, url, table_id):
         page_loaded = wait.until(
             lambda driver: driver.find_element_by_id(DIVIDEND_DATA_ID)
         )
-    #    element = WebDriverWait(driver, 10, poll_frequency=5).until(
-    #        EC.presence_of_element_located((By.ID, "DataTables_Table_0"))
-    #    )
     except TimeoutError:
         driver.close()
 
-#    time.sleep(10)
     elem = driver.find_element_by_id(DIVIDEND_DATA_ID)
     debug_print(elem.text)
     # skip the title line for the data table
@@ -463,9 +456,6 @@ def scrape_quotemedia_data(ticker, url, table_id):
             page_loaded = wait.until(
                 lambda driver: driver.find_element_by_id(DIVIDEND_DATA_ID)
             )
-        #    element = WebDriverWait(driver, 10, poll_frequency=5).until(
-        #        EC.presence_of_element_located((By.ID, "DataTables_Table_0"))
-        #    )
             elem = driver.find_element_by_id(DIVIDEND_DATA_ID)
             # skip the title line for the data table
             web_data += (elem.text.splitlines())[1:]
