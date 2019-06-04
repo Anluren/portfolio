@@ -30,7 +30,8 @@ class Quotemedia:
             return ""
         web_data = self.driver.find_element_by_class_name('qmod-quotegrid').text
         debug_print(web_data)
-        return web_data
+        web_data = web_data.split('\n')
+        return dict(zip(web_data[0::2], web_data[1::2]))
 
     def get_price_history(self, ticker):
         full_url = Quotemedia.price_history_url + ticker
@@ -89,7 +90,10 @@ class Quotemedia:
 
 if __name__ == '__main__':
     browser = Quotemedia()
-    browser.get_realtime_price("VTI")
+    stock_data = browser.get_realtime_price("VTI")
+
+    print(stock_data)
+    del(browser)
 #   browser.get_price_history("TDB902:CA")
 #   browser.get_price_history("TDB900:CA")
 #   browser.get_price_history("TDB911:CA")
